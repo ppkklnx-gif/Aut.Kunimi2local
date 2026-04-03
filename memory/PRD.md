@@ -1,76 +1,86 @@
-# Red Team Automation Framework v3.1 - PRD
+# Red Team Automation Framework v3.2 - PRD
 
 ## Problem Statement
-Framework Red Team profesional con MITRE ATT&CK y **Tactical Decision Engine** que adapta el plan de ataque en tiempo real basado en los hallazgos.
+Framework Red Team profesional con MITRE ATT&CK, Tactical Decision Engine adaptativo, Moonshot AI (Kimi K2) para analisis inteligente, y Attack Chains automatizadas con motor de ejecucion paso a paso.
 
-## Key Feature: Tactical Decision Engine
+## What's Implemented
 
-### ¿Qué hace?
-Analiza resultados DESPUÉS de cada herramienta y adapta la estrategia:
+### Core Features (Complete)
+- [x] 14 tacticas MITRE ATT&CK seleccionables (Kill Chain)
+- [x] 34 herramientas Red Team categorizadas
+- [x] 35+ modulos Metasploit con MITRE mapping
+- [x] Tema Matrix/Cyberpunk (#FF003C, #00FF41, negro)
+- [x] Moonshot AI (Kimi K2) Red Team Advisor
+- [x] Scan system con background tasks y polling
 
-1. **WAF Detection → Bypass Strategies**
-   - Cloudflare: Origin IP discovery, DNS history
-   - Akamai: Edge bypass, request smuggling
-   - AWS WAF: Unicode normalization
-   - Imperva: MX/SPF records analysis
+### Tactical Decision Engine (Complete)
+- [x] WAF bypass strategies (Cloudflare, Akamai, AWS WAF, Imperva, ModSecurity)
+- [x] Service-to-attack mapping (10+ servicios)
+- [x] Vulnerability-to-exploit mapping (SQL, XSS, LFI, RFI, SSRF, etc)
+- [x] Adaptive planning en tiempo real
 
-2. **Service Discovery → Attack Mapping**
-   - SSH (22) → Credential brute force, key auth
-   - HTTP (80/443) → Nikto, SQLmap, directory enum
-   - SMB (445) → EternalBlue, null sessions
-   - RDP (3389) → BlueKeep, credential spray
-   - Kerberos (88) → AS-REP roasting, Kerberoasting
+### Attack Chains (Complete - P0 + P1)
+- [x] 6 cadenas predefinidas: Web to Shell, SMB to Domain, Kerberos, Linux PrivEsc, Windows PrivEsc, Phishing to Shell
+- [x] Motor de ejecucion automatica (auto_execute) con tracking paso a paso
+- [x] Ejecucion manual paso a paso con botones [RUN] individuales
+- [x] Pipeline visual de progreso (S1 > S2 > S3 > S4) con colores de estado
+- [x] Polling en tiempo real (1.5s) durante ejecucion
+- [x] Context variables (LHOST, Domain, User, Pass) para personalizar comandos
+- [x] Deteccion automatica de chains aplicables segun hallazgos
+- [x] Resultados por paso en el terminal
 
-3. **Vulnerability → Exploit Mapping**
-   - SQL Injection → sqlmap + credential dump
-   - XSS → Session hijacking, phishing
-   - LFI/RFI → Log poisoning, RCE
-   - Shellshock → Direct RCE
-   - Log4Shell → JNDI callback
+### Attack Tree (Complete)
+- [x] Arbol de ataque interactivo con nodos priorizados
+- [x] Nodos de WAF, prioridad, herramienta, exploit
+- [x] Status tracking por nodo (pending/testing/success/failed)
 
 ## Architecture
-- **TacticalDecisionEngine**: Motor de decisión adaptativo
-- **Kimi K2 AI**: Red Team Advisor con contexto táctico
-- **Attack Tree**: Nodos con prioridades basadas en análisis
-- **Real-time Updates**: Decisiones mostradas en terminal
-
-## What's Implemented (Jan 2026)
-- [x] 14 tácticas MITRE ATT&CK seleccionables
-- [x] 34 herramientas Red Team categorizadas
-- [x] 35+ módulos Metasploit con MITRE mapping
-- [x] Tactical Decision Engine con adaptación en tiempo real
-- [x] WAF bypass strategies para 5+ WAFs
-- [x] Service-to-attack mapping para 10+ servicios
-- [x] Vulnerability-to-exploit mapping
-- [x] Attack tree con nodos de prioridad
-- [x] AI advisor con contexto táctico
+- Frontend: React + TailwindCSS + Shadcn UI (Matrix theme)
+- Backend: FastAPI + Motor (MongoDB async)
+- Database: MongoDB
+- AI: Moonshot AI (Kimi K2) via API
+- Execution: Background tasks con asyncio
 
 ## API Endpoints
-- GET /api/tactical/waf-bypass/{waf} - Estrategias bypass
-- GET /api/tactical/service-attacks - Mapeo servicio→ataque
-- GET /api/tactical/vuln-exploits - Mapeo vuln→exploit
-- POST /api/scan/start - Inicia con tactical_decisions
-- GET /api/scan/{id}/status - Incluye final_tactical
+- GET /api/ - Health check
+- GET /api/mitre/tactics - Tacticas MITRE
+- GET /api/tools - Herramientas Red Team
+- POST /api/scan/start - Iniciar escaneo
+- GET /api/scan/{id}/status - Status del escaneo
+- GET /api/scan/{id}/tree - Attack tree
+- PUT /api/scan/{id}/tree/node/{id} - Actualizar nodo
+- GET /api/scan/history - Historial
+- GET /api/chains - Listar cadenas
+- GET /api/chains/{id} - Detalles de cadena
+- POST /api/chains/execute - Ejecutar cadena (manual/auto)
+- GET /api/chains/execution/{id} - Status de ejecucion
+- POST /api/chains/execution/{id}/step/{id} - Ejecutar paso manual
+- POST /api/chains/detect - Detectar chains aplicables
+- POST /api/chains/{id}/generate - Generar comandos
+- GET /api/metasploit/modules - Modulos MSF
+- POST /api/metasploit/execute - Ejecutar MSF
+- GET /api/tactical/waf-bypass/{waf} - Bypass strategies
+- GET /api/tactical/service-attacks - Service attack map
+- GET /api/tactical/vuln-exploits - Vuln exploit map
 
 ## Prioritized Backlog
 
 ### P0 - Completado
-- ✅ Tactical Decision Engine
-- ✅ WAF bypass strategies
-- ✅ Adaptive planning
+- Attack Chains display y ejecucion
+- Tactical Decision Engine
+- MITRE ATT&CK Kill Chain
 
-### P1 (High)
-- [ ] Cobalt Strike Beacon simulation
-- [ ] C2 Framework integration (Sliver/Havoc)
-- [ ] BloodHound AD attack paths
-- [ ] Real Metasploit integration
+### P1 - Completado
+- Attack Chain Execution Engine con tracking en tiempo real
 
-### P2 (Medium)
-- [ ] WebSocket real-time updates
-- [ ] Automated exploitation chains
-- [ ] Report generation PDF
+### P2 (Proximo)
+- C2 Framework integration (Sliver/Havoc)
+- BloodHound AD attack paths
+- WebSocket real-time updates (reemplazar polling)
+- Report generation PDF
+- Real Metasploit integration (msfrpcd)
 
-## Next Tasks
-1. Desplegar en Kali Linux real
-2. Integrar msfrpcd para MSF real
-3. Agregar C2 framework support
+### P3 (Futuro)
+- Cobalt Strike Beacon simulation
+- Multi-target campaign management
+- Deploy en Kali Linux real
