@@ -6,6 +6,8 @@ services:
     image: mongo:7
     container_name: redteam-mongo
     restart: unless-stopped
+    ports:
+      - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -13,31 +15,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - redteam
-
-  # ─── Backend (FastAPI) ─────────────────────────────────────
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: redteam-backend
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      - MONGO_URL=mongodb://mongo:27017
-      - DB_NAME=redteam_framework
-    ports:
-      - "${BACKEND_PORT:-8001}:8001"
-    depends_on:
-      mongo:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - sliver_configs:/configs:ro
-    networks:
-      - redteam
 
   # ─── Frontend (React + Nginx) ──────────────────────────────
   frontend:
@@ -50,17 +27,12 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      - backend
-    networks:
-      - redteam
+      mongo:
+        condition: service_healthy
 
 volumes:
   mongo_data:
     driver: local
-  sliver_configs:
-    driver: local
-
-networks:
-  redteam:
-    driver: bridge
