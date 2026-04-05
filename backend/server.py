@@ -2511,9 +2511,15 @@ async def msf_rpc_status():
 
 @api_router.post("/msf/connect")
 async def msf_rpc_connect():
-    """Connect to msfrpcd"""
+    """Force reconnect to msfrpcd with diagnostics"""
     msf_module.disconnect_msf()
-    return msf_module.get_msf_status(MSF_RPC_TOKEN, MSF_RPC_HOST, MSF_RPC_PORT)
+    status = msf_module.get_msf_status(MSF_RPC_TOKEN, MSF_RPC_HOST, MSF_RPC_PORT)
+    return status
+
+@api_router.get("/msf/diagnostics")
+async def msf_diagnostics():
+    """Get detailed MSF RPC connection diagnostics"""
+    return msf_module.get_connection_detail()
 
 @api_router.get("/msf/search")
 async def msf_rpc_search(query: str = "", module_type: str = ""):
@@ -2624,6 +2630,27 @@ async def sliver_start_listener(data: Dict[str, Any]):
         lport=data.get("lport", 443),
         protocol=data.get("protocol", "mtls")
     )
+
+@api_router.post("/sliver/reconnect")
+async def sliver_reconnect():
+    """Force reconnect to Sliver C2"""
+    global _sliver_client, _sliver_connected
+    sliver_module._sliver_client = None
+    sliver_module._sliver_connected = False
+    sliver_module._sliver_retry_count = 0
+    return await sliver_module.get_status(SLIVER_CONFIG_PATH)
+
+@api_router.post("/c2/reconnect")
+async def c2_reconnect_all():
+    """Force reconnect both MSF and Sliver"""
+    msf_module.disconnect_msf()
+    sliver_module._sliver_client = None
+    sliver_module._sliver_connected = False
+    sliver_module._sliver_retry_count = 0
+
+    msf_status = msf_module.get_msf_status(MSF_RPC_TOKEN, MSF_RPC_HOST, MSF_RPC_PORT)
+    sliver_stat = await sliver_module.get_status(SLIVER_CONFIG_PATH)
+    return {"metasploit": msf_status, "sliver": sliver_stat}
 
 # ============ C2 UNIFIED DASHBOARD ============
 

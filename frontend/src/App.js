@@ -455,7 +455,7 @@ function App() {
                       <div className="p-4">
                         {attackTree ? (
                           <div className="space-y-2">
-                            {attackTree.nodes?.map((node, i) => (
+                            {(Array.isArray(attackTree.nodes) ? attackTree.nodes : Object.values(attackTree.nodes || {})).map((node, i) => (
                               <div key={i} className={`flex items-center gap-3 p-2 border transition-all cursor-pointer hover:bg-[#0C1A12] ${node.status === "success" ? "border-[#00FF41]/50" : node.status === "testing" ? "border-[#FFB000]/50" : node.status === "failed" ? "border-[#FF003C]/50" : "border-[rgba(0,255,65,0.15)]"}`} data-testid={`graph-node-${i}`}>
                                 <span className={`status-dot ${node.status === "success" ? "active" : node.status === "testing" ? "scanning" : node.status === "failed" ? "offline" : "idle"}`} />
                                 <div className="flex-1">
@@ -520,7 +520,7 @@ function App() {
                         {/* Steps */}
                         <ScrollArea className="h-48">
                           <div className="space-y-1">
-                            {selectedChain.steps?.map(step => {
+                            {(selectedChain.steps || []).map(step => {
                               const ss = chainExecution?.step_statuses?.[String(step.id)]?.status || "pending";
                               return (
                                 <div key={step.id} className={`panel p-2 ${ss === "running" ? "animate-pulse" : ""}`} style={{ borderColor: ss === "completed" ? "#00FF41" : ss === "running" ? "#FFB000" : ss === "failed" ? "#FF003C" : ss === "skipped" ? "#2F4F38" : undefined }} data-testid={`chain-step-${step.id}`}>
@@ -534,7 +534,7 @@ function App() {
                                     </div>
                                   </div>
                                   <div className="mt-1 space-y-0.5">
-                                    {step.actions?.map((a, ai) => (
+                                    {(step.actions || []).map((a, ai) => (
                                       <div key={ai} className="flex items-center gap-1 text-[10px]">
                                         <span className="text-[#2F4F38] bg-[#020302] px-1 py-0.5 flex-1 truncate font-mono">{a.tool && <span className="text-[#FFB000]">[{a.tool}] </span>}{a.cmd || a.module}</span>
                                         <button onClick={() => navigator.clipboard.writeText(a.cmd || a.module || "")} className="text-[#2F4F38] hover:text-[#00FF41]"><Copy size={9} /></button>
@@ -594,7 +594,7 @@ function App() {
                             </div>
                             <p className="text-[10px] text-[#8BBE95] mt-1">{c.description}</p>
                             <div className="flex gap-1 mt-1 flex-wrap">
-                              {c.triggers?.map((t, ti) => <span key={ti} className="text-[10px] px-1 border border-[#FFB000]/30 text-[#FFB000]">{t}</span>)}
+                              {(c.triggers || []).map((t, ti) => <span key={ti} className="text-[10px] px-1 border border-[#FFB000]/30 text-[#FFB000]">{t}</span>)}
                             </div>
                           </div>
                         ))}
@@ -630,7 +630,10 @@ function App() {
                       <>
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-bold tracking-[0.15em] uppercase">Command & Control</h3>
-                          <button onClick={loadC2} className="tac-btn text-[10px]" data-testid="c2-refresh-btn"><RefreshCw size={12} /></button>
+                          <div className="flex gap-2">
+                            <button onClick={async () => { addLog("info", "Reconnecting all C2..."); try { const r = await axios.post(`${API}/c2/reconnect`); loadC2(); addLog("success", `MSF: ${r.data.metasploit?.connected ? "ONLINE" : r.data.metasploit?.error} | Sliver: ${r.data.sliver?.connected ? "ONLINE" : r.data.sliver?.error}`); } catch(e) { addLog("error", e.message); } }} className="tac-btn tac-btn-solid text-[10px]" data-testid="c2-reconnect-btn"><Zap size={12} /> RECONNECT</button>
+                            <button onClick={loadC2} className="tac-btn text-[10px]" data-testid="c2-refresh-btn"><RefreshCw size={12} /></button>
+                          </div>
                         </div>
                         {c2Dashboard ? (
                           <div className="grid grid-cols-2 gap-3">
@@ -644,16 +647,26 @@ function App() {
                                 {c2Dashboard.metasploit?.connected ? (
                                   <div className="space-y-2">
                                     <p className="text-[10px] text-[#8BBE95]">v{c2Dashboard.metasploit.version} // Sessions: {c2Dashboard.metasploit.session_count} // Jobs: {c2Dashboard.metasploit.job_count}</p>
-                                    {c2Dashboard.metasploit.sessions?.map((s, i) => (
+                                    {(c2Dashboard.metasploit.sessions || []).map((s, i) => (
                                       <div key={i} onClick={() => setSelectedSession({ ...s, source: "msf" })} className="session-card" data-testid={`msf-session-${s.id}`}>
                                         <span className="text-[10px] text-[#00FF41]">{s.type} @ {s.target_host}</span>
+                                        <span className="text-[10px] text-[#2F4F38]">{s.via_payload}</span>
                                       </div>
                                     ))}
+                                    {c2Dashboard.metasploit.session_count === 0 && <p className="text-[10px] text-[#2F4F38]">No active sessions</p>}
                                   </div>
                                 ) : (
-                                  <div className="text-[10px] text-[#2F4F38] space-y-1">
-                                    <p>Not connected</p>
-                                    <code className="block bg-[#020302] p-2 text-[#00FF41]">msfrpcd -P TOKEN -S -a 127.0.0.1</code>
+                                  <div className="text-[10px] space-y-2">
+                                    <p className="text-[#FF003C]">{c2Dashboard.metasploit?.error || "Not connected"}</p>
+                                    {c2Dashboard.metasploit?.hint && <p className="text-[#FFB000]">{c2Dashboard.metasploit.hint}</p>}
+                                    {c2Dashboard.metasploit?.diagnostics && (
+                                      <div className="bg-[#020302] p-2 space-y-1 border border-[rgba(0,255,65,0.1)]">
+                                        <p className="text-[#2F4F38]">Token set: {c2Dashboard.metasploit.diagnostics.token_set ? "Yes" : "NO"}</p>
+                                        <p className="text-[#2F4F38]">Port reachable: {c2Dashboard.metasploit.diagnostics.port_reachable ? "Yes" : "NO"}</p>
+                                        {c2Dashboard.metasploit.diagnostics.reconnecting && <p className="text-[#FFB000]">Auto-reconnecting (attempt {c2Dashboard.metasploit.diagnostics.retry_count})...</p>}
+                                      </div>
+                                    )}
+                                    <code className="block bg-[#020302] p-2 text-[#00FF41]">msfrpcd -P TOKEN -S -a 127.0.0.1 -p 55553</code>
                                   </div>
                                 )}
                               </div>
@@ -667,17 +680,27 @@ function App() {
                               <div className="p-3">
                                 {c2Dashboard.sliver?.connected ? (
                                   <div className="space-y-2">
-                                    <p className="text-[10px] text-[#8BBE95]">v{c2Dashboard.sliver.version} // Sessions: {c2Dashboard.sliver.session_count}</p>
-                                    {c2Dashboard.sliver.sessions?.map((s, i) => (
-                                      <div key={i} onClick={() => setSelectedSession({ ...s, source: "sliver" })} className="session-card">
+                                    <p className="text-[10px] text-[#8BBE95]">v{c2Dashboard.sliver.version} // Sessions: {c2Dashboard.sliver.session_count} // Beacons: {c2Dashboard.sliver.beacon_count}</p>
+                                    {(c2Dashboard.sliver.sessions || []).map((s, i) => (
+                                      <div key={i} onClick={() => setSelectedSession({ ...s, source: "sliver" })} className="session-card" data-testid={`sliver-session-${s.id}`}>
                                         <span className="text-[10px] text-[#00F0FF]">{s.name} @ {s.hostname}</span>
+                                        <span className="text-[10px] text-[#2F4F38]">{s.os}/{s.arch} via {s.transport}</span>
                                       </div>
                                     ))}
+                                    {c2Dashboard.sliver.session_count === 0 && <p className="text-[10px] text-[#2F4F38]">No active sessions</p>}
                                   </div>
                                 ) : (
-                                  <div className="text-[10px] text-[#2F4F38] space-y-1">
-                                    <p>Not connected</p>
-                                    <code className="block bg-[#020302] p-2 text-[#00FF41]">curl https://sliver.sh/install|sudo bash</code>
+                                  <div className="text-[10px] space-y-2">
+                                    <p className="text-[#FF003C]">{c2Dashboard.sliver?.error || "Not connected"}</p>
+                                    {c2Dashboard.sliver?.hint && <p className="text-[#FFB000]">{c2Dashboard.sliver.hint}</p>}
+                                    {c2Dashboard.sliver?.diagnostics && (
+                                      <div className="bg-[#020302] p-2 space-y-1 border border-[rgba(0,255,65,0.1)]">
+                                        <p className="text-[#2F4F38]">Config path: {c2Dashboard.sliver.diagnostics.config_path_raw || "NOT SET"}</p>
+                                        <p className="text-[#2F4F38]">Resolved: {c2Dashboard.sliver.diagnostics.resolved || "N/A"}</p>
+                                        {c2Dashboard.sliver.diagnostics.validation_error && <p className="text-[#FF003C]">{c2Dashboard.sliver.diagnostics.validation_error}</p>}
+                                      </div>
+                                    )}
+                                    <code className="block bg-[#020302] p-2 text-[#00FF41]">sliver-server &amp;&amp; sliver new-operator ...</code>
                                   </div>
                                 )}
                               </div>
