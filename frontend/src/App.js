@@ -6,7 +6,7 @@ import {
   Play, Square, Plus, Trash2, RefreshCw, ChevronRight, CheckCircle, XCircle,
   Zap, Shield, Wifi, Skull, Eye, Activity, Server, Lock, Globe, Copy,
   Download, Search, Command, MonitorSmartphone, Clock, AlertTriangle, Target,
-  Settings, Save
+  Settings, Save, Package
 } from "lucide-react";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Progress } from "./components/ui/progress";
@@ -67,6 +67,11 @@ function App() {
   // Global config
   const [globalConfig, setGlobalConfig] = useState({ listener_ip: "", listener_port: 4444, c2_protocol: "tcp", operator_name: "operator", stealth_mode: false, auto_lhost: true });
   const [configSaving, setConfigSaving] = useState(false);
+
+  // Payloads
+  const [payloadTemplates, setPayloadTemplates] = useState([]);
+  const [generatedPayload, setGeneratedPayload] = useState(null);
+  const [payloadFilter, setPayloadFilter] = useState("all");
 
   // Refs
   const pollIntervalRef = useRef(null);
@@ -255,7 +260,7 @@ function App() {
     const effectiveLhost = msfLhost || globalConfig.listener_ip;
     addLog("cmd", `msf > ${msfModule} [LHOST=${effectiveLhost || "NOT SET"}]`);
     try {
-      const res = await axios.post(`${API}/metasploit/execute`, { module: msfModule, target: target || "127.0.0.1", port: msfPort ? parseInt(msfPort) : null, options: {}, lhost: effectiveLhost, lport: globalConfig.listener_port || 4444 });
+      const res = await axios.post(`${API}/metasploit/execute`, { scan_id: currentScan || "manual", node_id: "manual_exec", module: msfModule, target_host: target || "127.0.0.1", target_port: msfPort ? parseInt(msfPort) : null, options: {}, lhost: effectiveLhost, lport: globalConfig.listener_port || 4444 });
       setMsfResult(res.data);
       addLog(res.data.success ? "success" : "error", res.data.success ? "Exploit SUCCESS" : "Exploit FAILED");
     } catch (e) { addLog("error", e.message); }
@@ -278,6 +283,23 @@ function App() {
     setConfigSaving(false);
   };
 
+  // Load payload templates
+  const loadPayloads = async () => {
+    try {
+      const res = await axios.get(`${API}/payloads/templates`);
+      setPayloadTemplates(res.data.payloads || []);
+    } catch (e) { addLog("error", `Payload load error: ${e.message}`); }
+  };
+
+  // Generate payload
+  const generatePayload = async (payloadId) => {
+    try {
+      const res = await axios.post(`${API}/payloads/generate`, { payload_id: payloadId });
+      setGeneratedPayload(res.data);
+      addLog("success", `PAYLOAD GENERATED: ${res.data.name} [${res.data.lhost}:${res.data.lport}]`);
+    } catch (e) { addLog("error", e.response?.data?.detail || e.message); }
+  };
+
   // Filtered logs
   const filteredLogs = logFilter === "all" ? terminalLines : terminalLines.filter(l => l.type === logFilter);
 
@@ -288,6 +310,7 @@ function App() {
     { id: "graph", icon: GitBranch, label: "Attack Graph" },
     { id: "chains", icon: Link, label: "Chains" },
     { id: "c2", icon: Radio, label: "C2" },
+    { id: "payloads", icon: Package, label: "Payloads" },
     { id: "ai", icon: Brain, label: "AI" },
     { id: "config", icon: Settings, label: "Config" },
     { id: "logs", icon: Terminal, label: "Logs" },
@@ -311,7 +334,7 @@ function App() {
         {/* Nav */}
         <nav className="flex-1 py-2">
           {navItems.map(item => (
-            <div key={item.id} onClick={() => { setActiveSection(item.id); if (item.id === "c2" && !c2Dashboard) loadC2(); }} className={`nav-item ${activeSection === item.id ? "active" : ""}`} data-testid={`nav-${item.id}`}>
+            <div key={item.id} onClick={() => { setActiveSection(item.id); if (item.id === "c2" && !c2Dashboard) loadC2(); if (item.id === "payloads" && payloadTemplates.length === 0) loadPayloads(); }} className={`nav-item ${activeSection === item.id ? "active" : ""}`} data-testid={`nav-${item.id}`}>
               <item.icon size={14} />
               <span>{item.label}</span>
             </div>
@@ -665,6 +688,107 @@ function App() {
                         )}
                       </>
                     )}
+                  </div>
+                )}
+
+                {/* ===== PAYLOADS ===== */}
+                {activeSection === "payloads" && (
+                  <div className="space-y-3" data-testid="payloads-section">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold tracking-[0.15em] uppercase">Payload Generator</h3>
+                      <div className="flex gap-2">
+                        <span className={`text-[10px] px-2 py-1 border ${globalConfig.listener_ip ? "border-[#00FF41] text-[#00FF41]" : "border-[#FF003C] text-[#FF003C]"}`}>
+                          LHOST: {globalConfig.listener_ip || "NOT SET"}:{globalConfig.listener_port}
+                        </span>
+                        <button onClick={loadPayloads} className="tac-btn text-[10px]" data-testid="refresh-payloads"><RefreshCw size={12} /></button>
+                      </div>
+                    </div>
+
+                    {!globalConfig.listener_ip && (
+                      <div className="panel p-3 border-[#FF003C]">
+                        <div className="text-xs text-[#FF003C] flex items-center gap-2"><AlertTriangle size={14} /> LHOST no configurado. Ve a Config para establecer tu IP de VPS/listener.</div>
+                      </div>
+                    )}
+
+                    {/* Filter */}
+                    <div className="flex gap-1">
+                      {["all", "windows", "linux", "oneliner", "implant"].map(f => (
+                        <button key={f} onClick={() => setPayloadFilter(f)} className={`text-[10px] px-2 py-1 border uppercase ${payloadFilter === f ? "border-[#00FF41] text-[#00FF41]" : "border-[rgba(0,255,65,0.15)] text-[#2F4F38]"}`} data-testid={`payload-filter-${f}`}>{f}</button>
+                      ))}
+                    </div>
+
+                    {/* Generated Payload Detail */}
+                    {generatedPayload && (
+                      <div className="panel p-4 border-[#00FF41]" data-testid="generated-payload-detail">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs text-[#00FF41] font-bold">{generatedPayload.name}</span>
+                          <button onClick={() => setGeneratedPayload(null)} className="text-[#2F4F38] hover:text-[#FF003C]"><XCircle size={14} /></button>
+                        </div>
+                        <div className="space-y-2">
+                          <div>
+                            <span className="text-[10px] text-[#FFB000] uppercase block mb-1">Generator Command (run on your Kali)</span>
+                            <div className="flex items-center gap-1">
+                              <code className="text-[10px] text-[#00FF41] bg-[#020302] px-2 py-2 flex-1 font-mono break-all">{generatedPayload.generator_cmd}</code>
+                              <button onClick={() => { navigator.clipboard.writeText(generatedPayload.generator_cmd); addLog("info", "Generator cmd copied"); }} className="text-[#2F4F38] hover:text-[#00FF41] flex-shrink-0"><Copy size={14} /></button>
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-[#FFB000] uppercase block mb-1">Handler (start BEFORE executing payload)</span>
+                            <div className="flex items-center gap-1">
+                              <code className="text-[10px] text-[#00F0FF] bg-[#020302] px-2 py-2 flex-1 font-mono break-all">{generatedPayload.handler_cmd}</code>
+                              <button onClick={() => { navigator.clipboard.writeText(generatedPayload.handler_cmd); addLog("info", "Handler cmd copied"); }} className="text-[#2F4F38] hover:text-[#00FF41] flex-shrink-0"><Copy size={14} /></button>
+                            </div>
+                          </div>
+                          {generatedPayload.payload_content && (
+                            <div>
+                              <span className="text-[10px] text-[#FF003C] uppercase block mb-1">Payload (copy & paste on target)</span>
+                              <div className="flex items-center gap-1">
+                                <code className="text-[10px] text-[#FF003C] bg-[#020302] px-2 py-2 flex-1 font-mono break-all">{generatedPayload.payload_content}</code>
+                                <button onClick={() => { navigator.clipboard.writeText(generatedPayload.payload_content); addLog("info", "Payload copied"); }} className="text-[#2F4F38] hover:text-[#00FF41] flex-shrink-0"><Copy size={14} /></button>
+                              </div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-4 gap-2 text-[10px]">
+                            <div><span className="text-[#2F4F38]">Platform:</span> <span className="text-[#8BBE95]">{generatedPayload.platform}</span></div>
+                            <div><span className="text-[#2F4F38]">Arch:</span> <span className="text-[#8BBE95]">{generatedPayload.arch}</span></div>
+                            <div><span className="text-[#2F4F38]">LHOST:</span> <span className="text-[#00FF41]">{generatedPayload.lhost}</span></div>
+                            <div><span className="text-[#2F4F38]">LPORT:</span> <span className="text-[#00FF41]">{generatedPayload.lport}</span></div>
+                          </div>
+                          <div className="text-[10px] text-[#8BBE95] mt-1">{generatedPayload.description}</div>
+                          {generatedPayload.execution_method && (
+                            <div className="text-[10px] text-[#FFB000] mt-1 p-2 border border-[#FFB000]/30 bg-[rgba(255,176,0,0.05)]">
+                              {generatedPayload.execution_method}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Template List */}
+                    <div className="space-y-1">
+                      {payloadTemplates
+                        .filter(p => payloadFilter === "all" || p.platform === payloadFilter || p.type === payloadFilter)
+                        .map((p, i) => (
+                        <div key={i} className="panel p-3" data-testid={`payload-${p.id}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-[#FF003C] font-bold">{p.name}</span>
+                                <span className={`text-[10px] px-1 border ${p.type === "oneliner" ? "border-[#FFB000] text-[#FFB000]" : p.type === "implant" ? "border-[#00F0FF] text-[#00F0FF]" : "border-[#00FF41] text-[#00FF41]"}`}>{p.type}</span>
+                                <span className="text-[10px] px-1 border border-[#2F4F38] text-[#2F4F38]">{p.platform}/{p.arch}</span>
+                              </div>
+                              <p className="text-[10px] text-[#8BBE95] mt-1">{p.description}</p>
+                            </div>
+                            <button onClick={() => generatePayload(p.id)} disabled={!globalConfig.listener_ip} className="tac-btn tac-btn-red text-[10px] flex-shrink-0 ml-3" data-testid={`gen-payload-${p.id}`}>
+                              <Zap size={12} /> GENERATE
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {payloadTemplates.length === 0 && (
+                        <div className="text-[10px] text-[#2F4F38] text-center py-8">Loading payload templates...</div>
+                      )}
+                    </div>
                   </div>
                 )}
 

